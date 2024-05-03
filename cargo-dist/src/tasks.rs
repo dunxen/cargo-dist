@@ -379,6 +379,8 @@ pub enum BuildStep {
     GenerateSourceTarball(SourceTarballStep),
     /// Checksum a file
     Checksum(ChecksumImpl),
+    /// Sign a file with cosign
+    Sign(SignImpl),
     /// Fetch or build an updater binary
     Updater(UpdaterStep),
     // FIXME: For macos universal builds we'll want
@@ -466,6 +468,17 @@ pub struct ChecksumImpl {
     pub for_artifact: Option<ArtifactId>,
 }
 
+/// Sign and create cosign bundle
+#[derive(Debug, Clone)]
+pub struct SignImpl {
+    /// of this file
+    pub src_path: Utf8PathBuf,
+    /// potentially write it to here
+    pub dest_path: Option<Utf8PathBuf>,
+    /// record it for this artifact in the dist-manifest
+    pub for_artifact: Option<ArtifactId>,
+}
+
 /// Create a source tarball
 #[derive(Debug, Clone)]
 pub struct SourceTarballStep {
@@ -536,6 +549,8 @@ pub struct Artifact {
     pub kind: ArtifactKind,
     /// A checksum for this artifact, if any
     pub checksum: Option<ArtifactIdx>,
+    /// A cosign bundle for this artifact, if any
+    pub cosign_bundle: Option<ArtifactIdx>,
     /// Indicates whether the artifact is local or global
     pub is_global: bool,
 }
@@ -571,6 +586,8 @@ pub enum ArtifactKind {
     Installer(InstallerImpl),
     /// A checksum
     Checksum(ChecksumImpl),
+    /// A cosign bundle
+    CosignBundle(SignImpl),
     /// A source tarball
     SourceTarball(SourceTarball),
     /// An extra artifact specified via config
@@ -661,6 +678,8 @@ pub struct Release {
     pub unix_archive: ZipStyle,
     /// Style of checksum to produce
     pub checksum: ChecksumStyle,
+    /// Whether to sign the release binaries with cosign
+    pub sign_binaries: bool,
     /// Customize the name of the npm package
     pub npm_package: Option<String>,
     /// The @scope to include in NPM packages
@@ -828,6 +847,8 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
             npm_scope: _,
             // Only the final value merged into a package_config matters
             checksum: _,
+            // Only the final value merged into a package_config matters
+            sign_binaries: _,
             // Only the final value merged into a package_config matters
             install_path: _,
             // Only the final value merged into a package_config matters
@@ -1187,6 +1208,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
             unix_archive,
             static_assets,
             checksum,
+            sign_binaries: should_sign,
             npm_package,
             npm_scope,
             install_path,
@@ -1301,6 +1323,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
         let release = self.release(to_release);
         let variants = release.variants.clone();
         let checksum = release.checksum;
+        let should_sign = release.sign_binaries;
         for variant_idx in variants {
             let (zip_artifact, built_assets) =
                 self.make_executable_zip_for_variant(to_release, variant_idx);
@@ -1312,6 +1335,10 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
 
             if checksum != ChecksumStyle::False {
                 self.add_artifact_checksum(variant_idx, zip_artifact_idx, checksum);
+            }
+
+            if should_sign {
+                self.add_artifact_cosign_bundle(variant_idx, zip_artifact_idx);
             }
         }
     }
@@ -1338,6 +1365,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                         artifact: target_path.to_owned(),
                     }),
                     checksum: None,
+                    cosign_bundle: None,
                     is_global: true,
                 };
 
@@ -1441,6 +1469,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                 target: target_path.to_owned(),
             }),
             checksum: None,
+            cosign_bundle: None,
             is_global: true,
         };
 
@@ -1463,6 +1492,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                     for_artifact,
                 }),
                 checksum: None,
+                cosign_bundle: None,
                 is_global: true,
             };
 
@@ -1497,12 +1527,44 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                 required_binaries: Default::default(),
                 // Who checksums the checksummers...
                 checksum: None,
+                cosign_bundle: None,
                 is_global: false,
             }
         };
         let checksum_idx = self.add_local_artifact(to_variant, checksum_artifact);
         self.artifact_mut(artifact_idx).checksum = Some(checksum_idx);
         checksum_idx
+    }
+
+    fn add_artifact_cosign_bundle(
+        &mut self,
+        to_variant: ReleaseVariantIdx,
+        artifact_idx: ArtifactIdx,
+    ) -> ArtifactIdx {
+        let artifact = self.artifact(artifact_idx);
+        let bundle_artifact = {
+            let bundle_id = format!("{}.bundle", artifact.id);
+            let bundle_path = artifact.file_path.parent().unwrap().join(&bundle_id);
+            Artifact {
+                id: bundle_id,
+                kind: ArtifactKind::CosignBundle(SignImpl {
+                    src_path: artifact.file_path.clone(),
+                    dest_path: Some(bundle_path.clone()),
+                    for_artifact: Some(artifact.id.clone()),
+                }),
+
+                target_triples: artifact.target_triples.clone(),
+                archive: None,
+                file_path: bundle_path,
+                required_binaries: Default::default(),
+                checksum: None,
+                cosign_bundle: None,
+                is_global: false,
+            }
+        };
+        let bundle_idx = self.add_local_artifact(to_variant, bundle_artifact);
+        self.artifact_mut(artifact_idx).cosign_bundle = Some(bundle_idx);
+        bundle_idx
     }
 
     fn add_updater(&mut self, variant_idx: ReleaseVariantIdx) {
@@ -1531,6 +1593,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
             archive: None,
             kind: ArtifactKind::Updater(UpdaterImpl {}),
             checksum: None,
+            cosign_bundle: None,
             is_global: false,
         }
     }
@@ -1592,6 +1655,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                 kind: ArtifactKind::ExecutableZip(ExecutableZip {}),
                 // May get filled in later
                 checksum: None,
+                cosign_bundle: None,
                 is_global: false,
             },
             built_assets,
@@ -1649,6 +1713,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                     required_binaries: FastMap::new(),
                     kind: ArtifactKind::Symbols(Symbols { kind: symbol_kind }),
                     checksum: None,
+                    cosign_bundle: None,
                     is_global: false,
                 };
 
@@ -1732,6 +1797,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
             file_path: artifact_path.clone(),
             required_binaries: FastMap::new(),
             checksum: None,
+            cosign_bundle: None,
             kind: ArtifactKind::Installer(InstallerImpl::Shell(InstallerInfo {
                 dest_path: artifact_path,
                 app_name: release.app_name.clone(),
@@ -1859,6 +1925,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
             file_path: artifact_path.clone(),
             required_binaries: FastMap::new(),
             checksum: None,
+            cosign_bundle: None,
             kind: ArtifactKind::Installer(InstallerImpl::Homebrew(HomebrewInstallerInfo {
                 x86_64_macos,
                 x86_64_macos_sha256: None,
@@ -1945,6 +2012,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
             required_binaries: FastMap::new(),
             archive: None,
             checksum: None,
+            cosign_bundle: None,
             kind: ArtifactKind::Installer(InstallerImpl::Powershell(InstallerInfo {
                 dest_path: artifact_path,
                 app_name: release.app_name.clone(),
@@ -2041,6 +2109,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
             file_path: artifact_path.clone(),
             required_binaries: FastMap::new(),
             checksum: None,
+            cosign_bundle: None,
             kind: ArtifactKind::Installer(InstallerImpl::Npm(NpmInstallerInfo {
                 npm_package_name,
                 npm_package_version,
@@ -2083,6 +2152,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
         let release = self.release(to_release);
         let variants = release.variants.clone();
         let checksum = release.checksum;
+        let should_sign = release.sign_binaries;
 
         // Make an msi for every windows platform
         for variant_idx in variants {
@@ -2139,6 +2209,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                     static_assets: vec![],
                 }),
                 checksum: None,
+                cosign_bundle: None,
                 kind: ArtifactKind::Installer(InstallerImpl::Msi(MsiInstallerInfo {
                     package_dir: dir_path.clone(),
                     pkg_spec,
@@ -2163,6 +2234,9 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
             }
             if checksum != ChecksumStyle::False {
                 self.add_artifact_checksum(variant_idx, installer_idx, checksum);
+            }
+            if should_sign {
+                self.add_artifact_cosign_bundle(variant_idx, installer_idx);
             }
         }
 
@@ -2284,6 +2358,9 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                 }
                 ArtifactKind::Checksum(checksum) => {
                     build_steps.push(BuildStep::Checksum(checksum.clone()));
+                }
+                ArtifactKind::CosignBundle(bundle) => {
+                    build_steps.push(BuildStep::Sign(bundle.clone()))
                 }
                 ArtifactKind::SourceTarball(tarball) => {
                     build_steps.push(BuildStep::GenerateSourceTarball(SourceTarballStep {

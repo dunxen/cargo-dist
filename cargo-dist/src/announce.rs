@@ -435,6 +435,9 @@ pub fn announcement_github(manifest: &mut DistManifest) {
                 cargo_dist_schema::ArtifactKind::Checksum => {
                     // Do Nothing (will be included with the artifact it checksums)
                 }
+                cargo_dist_schema::ArtifactKind::CosignBundle => {
+                    // Do Nothing (will be included with the artifact it signs)
+                }
                 cargo_dist_schema::ArtifactKind::Unknown => {
                     // Do nothing
                 }
@@ -464,8 +467,8 @@ pub fn announcement_github(manifest: &mut DistManifest) {
         if !other_artifacts.is_empty() && download_url.is_some() {
             let download_url = download_url.as_ref().unwrap();
             writeln!(gh_body, "## Download {heading_suffix}\n",).unwrap();
-            gh_body.push_str("|  File  | Platform | Checksum |\n");
-            gh_body.push_str("|--------|----------|----------|\n");
+            gh_body.push_str("|  File  | Platform | Checksum | Cosign bundle |\n");
+            gh_body.push_str("|--------|----------|----------|---------------|\n");
 
             for artifact in other_artifacts {
                 // Artifacts with no name do not exist as files, and should have had install-hints
@@ -491,6 +494,12 @@ pub fn announcement_github(manifest: &mut DistManifest) {
                 } else {
                     String::new()
                 };
+                let cosign_bundle = if let Some(cosign_bundle_name) = &artifact.cosign_bundle {
+                    let cosign_bundle_download_url = format!("{download_url}/{cosign_bundle_name}");
+                    format!("[cosign bundle]({cosign_bundle_download_url})")
+                } else {
+                    String::new()
+                };
                 let mut triple = artifact
                     .target_triples
                     .iter()
@@ -499,7 +508,11 @@ pub fn announcement_github(manifest: &mut DistManifest) {
                 if triple.is_empty() {
                     triple = "Unknown".to_string();
                 }
-                writeln!(&mut gh_body, "| {download} | {triple} | {checksum} |").unwrap();
+                writeln!(
+                    &mut gh_body,
+                    "| {download} | {triple} | {checksum} | {cosign_bundle} |"
+                )
+                .unwrap();
             }
             writeln!(&mut gh_body).unwrap();
         }

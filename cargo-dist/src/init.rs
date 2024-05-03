@@ -233,6 +233,7 @@ fn get_new_dist_metadata(
             npm_scope: None,
             npm_package: None,
             checksum: None,
+            sign_binaries: None,
             precise_builds: None,
             merge_tasks: None,
             fail_fast: None,
@@ -808,6 +809,7 @@ fn apply_dist_to_metadata(metadata: &mut toml_edit::Item, meta: &DistMetadata) {
         npm_scope,
         npm_package,
         checksum,
+        sign_binaries,
         precise_builds,
         merge_tasks,
         fail_fast,
@@ -937,6 +939,13 @@ fn apply_dist_to_metadata(metadata: &mut toml_edit::Item, meta: &DistMetadata) {
         "checksum",
         "# Checksums to generate for each App\n",
         checksum.map(|c| c.ext()),
+    );
+
+    apply_optional_value(
+        table,
+        "sign_binaries",
+        "# Whether to sign binaries with cosign\n",
+        *sign_binaries,
     );
 
     apply_optional_value(

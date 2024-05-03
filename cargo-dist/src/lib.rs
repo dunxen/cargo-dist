@@ -30,8 +30,10 @@ use config::{
 };
 use console::Term;
 use semver::Version;
+use sigstore::{cosign::constraint::PrivateKeySigner, registry::{ClientConfig, ClientProtocol}};
 use temp_dir::TempDir;
 use tracing::info;
+use zeroize::Zerioizing;
 
 use errors::*;
 pub use init::{do_init, InitArgs};
@@ -51,6 +53,9 @@ pub mod platform;
 pub mod tasks;
 #[cfg(test)]
 mod tests;
+
+const ENV_PRIVATE_SIGNING_KEY: &str = "COSIGN_PRIVATE_KEY";
+const ENV_SIGNING_PASSWORD: &str = "COSIGN_PASSWORD";
 
 /// cargo dist build -- actually build binaries and installers!
 pub fn do_build(cfg: &Config) -> DistResult<DistManifest> {
@@ -395,6 +400,57 @@ fn generate_checksum(checksum: &ChecksumStyle, src_path: &Utf8Path) -> DistResul
         write!(&mut output, "{:02x}", byte).unwrap();
     }
     Ok(output)
+}
+
+/// Sign and generate a cosign bundle for the src_path to dest_path
+fn sign_binary(
+    manifest: &mut DistManifest,
+    src_path: &Utf8Path,
+    dest_path: Option<&Utf8Path>,
+    for_artifact: Option<&ArtifactId>,
+) -> DistResult<()> {
+
+    if let Some(dest_path) = dest_path {
+        write_checksum(&output, src_path, dest_path)?;
+    }
+    let auth = &sigstore::registry::Auth::Anonymous;
+    let mut oci_client_config = ClientConfig::default();
+    oci_client_config.protocol = ClientProtocol::Https;
+
+    let client_builder = sigstore::cosign::ClientBuilder::default().with_oci_client_config(oci_client_config);
+    let mut client = client_builder.build().map_err(|err|)?;
+
+
+
+    let signing_scheme = if let Some(ss) = &cli.signing_scheme {
+        &ss[..]
+    } else {
+        "ECDSA_P256_SHA256_ASN1"
+    };
+    let key = Zeroizing::new(std::env::var(ENV_PRIVATE_SIGNING_KEY).map_err(|_| {
+        DistError::EnvParseError {
+            line: format!("The environment variable '{ENV_PRIVATE_SIGNING_KEY}' is not set or is not valid unicode"),
+        }
+    })?);
+    let signing_scheme = SigningScheme::try_from(signing_scheme).map_err(anyhow::Error::msg)?;
+    let password = Zeroizing::new(std::env::var(ENV_SIGNING_PASSWORD).map_err(|_| {
+        DistError::EnvParseError {
+            line: format!("The environment variable '{ENV_SIGNING_PASSWORD}' is not set or is not valid unicode"),
+        }
+    })?);
+    let signer = PrivateKeySigner::new_with_raw(key, password, signing_scheme).map_err(|err| DistError::SigstoreError { details: err.to_string() })?;
+
+    signer.add_constraint(sig)
+
+
+
+    if let Some(artifact_id) = for_artifact {
+        if let Some(artifact) = manifest.artifacts.get_mut(artifact_id) {
+            artifact.checksums.insert(checksum.ext().to_owned(), output);
+        }
+    }
+
+    Ok(())
 }
 
 /// Creates a source code tarball from the git archive from

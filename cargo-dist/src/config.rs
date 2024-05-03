@@ -163,6 +163,12 @@ pub struct DistMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checksum: Option<ChecksumStyle>,
 
+    /// Whether to sign binary artifacts with cosign
+    ///
+    /// Defaults to false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sign_binaries: Option<bool>,
+
     /// Build only the required packages, and individually (since 0.1.0) (default: false)
     ///
     /// By default when we need to build anything in your workspace, we build your entire workspace
@@ -383,6 +389,7 @@ impl DistMetadata {
             npm_package: _,
             npm_scope: _,
             checksum: _,
+            sign_binaries: _,
             precise_builds: _,
             fail_fast: _,
             merge_tasks: _,
@@ -455,6 +462,7 @@ impl DistMetadata {
             npm_package,
             npm_scope,
             checksum,
+            sign_binaries,
             precise_builds,
             merge_tasks,
             fail_fast,
@@ -589,6 +597,9 @@ impl DistMetadata {
         }
         if checksum.is_none() {
             *checksum = workspace_config.checksum;
+        }
+        if sign_binaries.is_none() {
+            *sign_binaries = workspace_config.sign_binaries;
         }
         if install_path.is_none() {
             *install_path = workspace_config.install_path.clone();

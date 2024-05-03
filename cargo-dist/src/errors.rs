@@ -367,6 +367,10 @@ pub enum DistError {
         /// The input
         pair: String,
     },
+
+    /// An error related to sigstore
+    #[error("Signing with sigstore has failed")]
+    SigstoreError { details: String },
 }
 
 /// Errors related to finding the project
