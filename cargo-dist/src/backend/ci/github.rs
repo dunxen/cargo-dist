@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use axoasset::LocalAsset;
+use axoproject::GithubRepo;
 use cargo_dist_schema::{GithubMatrix, GithubMatrixEntry};
 use serde::Serialize;
 use tracing::warn;
@@ -66,6 +67,8 @@ pub struct GithubCiInfo {
     pub ssldotcom_windows_sign: Option<ProductionMode>,
     /// Whether to enable GitHub Attestations
     pub github_attestations: bool,
+    /// The repo where the GitHub Attestations are stored
+    pub source_repo: Option<GithubRepo>,
     /// what hosting provider we're using
     pub hosting_providers: Vec<HostingStyle>,
     /// whether to prefix release.yml and the tag pattern
@@ -186,6 +189,7 @@ impl GithubCiInfo {
             github_releases_repo,
             ssldotcom_windows_sign,
             github_attestations,
+            source_repo,
             hosting_providers,
         }
     }

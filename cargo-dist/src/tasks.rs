@@ -54,7 +54,7 @@ use axoprocess::Cmd;
 use axoproject::platforms::{
     TARGET_ARM64_LINUX_GNU, TARGET_ARM64_MAC, TARGET_X64_LINUX_GNU, TARGET_X64_MAC,
 };
-use axoproject::{PackageId, PackageIdx, WorkspaceInfo};
+use axoproject::{GithubRepo, PackageId, PackageIdx, WorkspaceInfo};
 use camino::Utf8PathBuf;
 use cargo_dist_schema::{ArtifactId, DistManifest, SystemId, SystemInfo};
 use semver::Version;
@@ -209,6 +209,8 @@ pub struct DistGraph {
     pub ssldotcom_windows_sign: Option<ProductionMode>,
     /// Whether to enable GitHub Attestations
     pub github_attestations: bool,
+    /// The canonical GitHub repo for this project where the builds happen
+    pub source_repo: Option<GithubRepo>,
     /// The desired cargo-dist version for handling this project
     pub desired_cargo_dist_version: Option<Version>,
     /// The desired rust toolchain for handling this project
@@ -880,6 +882,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
         let local_builds_are_lies = artifact_mode == ArtifactMode::Lies;
         let ssldotcom_windows_sign = ssldotcom_windows_sign.clone();
         let github_attestations = github_attestations.unwrap_or(false);
+        let source_repo = workspace.github_repo().unwrap_or(None);
         let tag_namespace = tag_namespace.clone();
         let github_releases_repo = github_releases_repo.clone();
         let github_releases_submodule_path = github_releases_submodule_path.clone();
@@ -1051,6 +1054,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                 github_releases_submodule_path,
                 ssldotcom_windows_sign,
                 github_attestations,
+                source_repo,
                 desired_cargo_dist_version,
                 desired_rust_toolchain,
                 tag_namespace,
@@ -1104,7 +1108,7 @@ impl<'pkg_graph> DistGraphBuilder<'pkg_graph> {
                 ci: None,
                 linkage: vec![],
                 upload_files: vec![],
-                github_attestations,
+                github_attestations: false,
             },
             package_metadata,
             workspace_metadata,

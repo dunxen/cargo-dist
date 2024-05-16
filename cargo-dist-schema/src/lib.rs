@@ -105,6 +105,7 @@ pub struct DistManifest {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub upload_files: Vec<String>,
+    /// Enable GitHub Artifact Attestations
     #[serde(default)]
     pub github_attestations: bool,
 }
@@ -444,6 +445,7 @@ impl DistManifest {
             ci: None,
             linkage: vec![],
             upload_files: vec![],
+            github_attestations: false,
         }
     }
 
